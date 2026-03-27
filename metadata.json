@@ -1,0 +1,5 @@
+{
+  "name": "Hash Generator",
+  "description": "A simple and secure tool to generate SHA-256 hashes for any file locally in your browser.",
+  "requestFramePermissions": []
+}
