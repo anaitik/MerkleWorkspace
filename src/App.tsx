@@ -75,21 +75,29 @@ export default function App() {
     const stored = getStoredLeaves();
     if (stored.length > 0) {
       setAllLeaves(stored);
-      updateMerkleRoot(stored);
     }
   }, []);
 
-  const updateMerkleRoot = async (leaves: string[]) => {
-    setIsCalculatingRoot(true);
-    try {
-      const root = await calculateMerkleRoot(leaves);
-      setMerkleRoot(root);
-    } catch (err) {
-      console.error('Error calculating Merkle Root:', err);
-    } finally {
-      setIsCalculatingRoot(false);
-    }
-  };
+  // Recalculate Merkle Root whenever leaves change
+  useEffect(() => {
+    const updateRoot = async () => {
+      if (allLeaves.length === 0) {
+        setMerkleRoot(null);
+        return;
+      }
+      setIsCalculatingRoot(true);
+      try {
+        const root = await calculateMerkleRoot(allLeaves);
+        setMerkleRoot(root);
+      } catch (err) {
+        console.error('Error calculating Merkle Root:', err);
+      } finally {
+        setIsCalculatingRoot(false);
+      }
+    };
+    
+    updateRoot();
+  }, [allLeaves]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const newFiles = Array.from(files).map(file => ({
@@ -113,7 +121,6 @@ export default function App() {
         setAllLeaves(prev => {
           const updated = [...prev, hash];
           saveLeaves(updated);
-          updateMerkleRoot(updated);
           return updated;
         });
       } catch (err) {
@@ -194,6 +201,46 @@ export default function App() {
       setBatchStatus('recorded');
     } catch (err: any) {
       setBatchError(err.message || 'Failed to record Merkle Root.');
+      setBatchStatus('error');
+    }
+  };
+
+  const recordFullWorkspaceOnBlockchain = async () => {
+    const readyHashes = filesData
+      .filter(f => f.hash && f.blockchainStatus === 'idle')
+      .map(f => f.hash!);
+
+    const allHashesToRecord = [...readyHashes];
+    if (merkleRoot) {
+      allHashesToRecord.push(merkleRoot);
+    }
+
+    if (allHashesToRecord.length === 0) return;
+
+    if (!window.ethereum) {
+      setBatchError('MetaMask not detected. Please try opening in a new tab.');
+      setBatchStatus('error');
+      return;
+    }
+
+    setBatchStatus('recording');
+    setBatchError(null);
+    setBatchTxHash(null);
+    
+    try {
+      const txHash = await recordHashesOnChain(allHashesToRecord);
+      setBatchTxHash(txHash);
+      setBatchStatus('recorded');
+      
+      // Update individual file statuses
+      setFilesData(prev => prev.map(f => 
+        readyHashes.includes(f.hash!) 
+          ? { ...f, blockchainStatus: 'recorded', txHash } 
+          : f
+      ));
+    } catch (err: any) {
+      console.error(err);
+      setBatchError(err.message || 'Full workspace transaction failed.');
       setBatchStatus('error');
     }
   };
@@ -462,12 +509,20 @@ export default function App() {
                         Clear All
                       </button>
                       <button
-                        onClick={recordBatchOnBlockchain}
+                        onClick={recordFullWorkspaceOnBlockchain}
                         disabled={idleFilesCount === 0 || batchStatus === 'recording'}
                         className="px-6 py-2 bg-[#1A73E8] text-white rounded-xl font-semibold hover:bg-[#185ABC] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md flex items-center gap-2"
                       >
+                        {batchStatus === 'recording' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Layers className="w-4 h-4" />}
+                        Record All + Root
+                      </button>
+                      <button
+                        onClick={recordBatchOnBlockchain}
+                        disabled={idleFilesCount === 0 || batchStatus === 'recording'}
+                        className="px-6 py-2 border border-[#1A73E8] text-[#1A73E8] rounded-xl font-semibold hover:bg-[#E8F0FE] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                      >
                         {batchStatus === 'recording' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                        Record All in One Transaction
+                        Record Files Only
                       </button>
                     </div>
                   </div>
